@@ -31,7 +31,7 @@ _WRITE_BUFFER_SIZE = 4 * io.DEFAULT_BUFFER_SIZE
 
 
 def open(filename, mode="rb", compresslevel=_COMPRESS_LEVEL_TRADEOFF,
-         encoding=None, errors=None, newline=None, *, mtime=None):
+         encoding=None, errors=None, newline=None, *, mtime=None, osid=255):
     """Open a gzip-compressed file in binary or text mode.
 
     The filename argument can be an actual filename (a str or bytes object),
@@ -63,10 +63,10 @@ def open(filename, mode="rb", compresslevel=_COMPRESS_LEVEL_TRADEOFF,
 
     gz_mode = mode.replace("t", "")
     if isinstance(filename, (str, bytes, os.PathLike)):
-        binary_file = GzipFile(filename, gz_mode, compresslevel, mtime=mtime)
+        binary_file = GzipFile(filename, gz_mode, compresslevel, mtime=mtime, osid=osid)
     elif hasattr(filename, "read") or hasattr(filename, "write"):
         binary_file = GzipFile(None, gz_mode, compresslevel, filename,
-                               mtime=mtime)
+                               mtime=mtime, osid=osid)
     else:
         raise TypeError("filename must be a str or bytes object, or a file")
 
@@ -159,7 +159,7 @@ class GzipFile(_streams.BaseStream):
     myfileobj = None
 
     def __init__(self, filename=None, mode=None,
-                 compresslevel=_COMPRESS_LEVEL_TRADEOFF, fileobj=None, mtime=None):
+                 compresslevel=_COMPRESS_LEVEL_TRADEOFF, fileobj=None, mtime=None, osid=255):
         """Constructor for the GzipFile class.
 
         At least one of fileobj and filename must be given a
@@ -243,6 +243,7 @@ class GzipFile(_streams.BaseStream):
                                                  zlib.DEF_MEM_LEVEL,
                                                  0)
                 self._write_mtime = mtime
+                self._write_osid = osid
                 self._buffer_size = _WRITE_BUFFER_SIZE
                 self._buffer = io.BufferedWriter(_WriteBufferStream(self),
                                                  buffer_size=self._buffer_size)
@@ -265,6 +266,13 @@ class GzipFile(_streams.BaseStream):
         if self.mode == WRITE:
             return self._write_mtime
         return self._buffer.raw._last_mtime
+
+    @property
+    def osid(self):
+        """Operating system identifier or None"""
+        if self.mode == WRITE:
+            return self._write_osid
+        return self._buffer.raw._last_osid
 
     def __repr__(self):
         s = repr(self.fileobj)
@@ -311,7 +319,7 @@ class GzipFile(_streams.BaseStream):
         else:
             xfl = b'\000'
         self.fileobj.write(xfl)
-        self.fileobj.write(b'\377')
+        self.fileobj.write(bytes([self._write_osid]))
         if fname:
             self.fileobj.write(fname + b'\000')
 
@@ -513,7 +521,7 @@ def _read_until_null(fp, crc=None):
 def _read_gzip_header(fp):
     '''Read a gzip header from `fp` and progress to the end of the header.
 
-    Returns last mtime if header was present or None otherwise.
+    Returns a tuple of last mtime and osid if header was present or None otherwise.
     '''
     magic = fp.read(2)
     if not magic:
@@ -522,7 +530,7 @@ def _read_gzip_header(fp):
     if magic != b'\037\213':
         raise BadGzipFile('Not a gzipped file (%r)' % magic)
     base_header = _read_exact(fp, 8)
-    (method, flag, last_mtime) = struct.unpack("<BBIxx", base_header)
+    (method, flag, last_mtime, osid) = struct.unpack("<BBIxB", base_header)
     if method != 8:
         raise BadGzipFile('Unknown compression method')
 
@@ -530,11 +538,11 @@ def _read_gzip_header(fp):
     # FNAME set (GzipFile, gzip command line application). Exit early
     # in those cases.
     if not flag:
-        return last_mtime
+        return last_mtime, osid
     if flag == FNAME:
         # Read and discard a null-terminated string containing the filename
         _read_until_null(fp)
-        return last_mtime
+        return last_mtime, osid
 
     # Processing for more complex flags. Save header parts for FHCRC checking.
     if flag & FHCRC:
@@ -559,7 +567,7 @@ def _read_gzip_header(fp):
         if header_crc != crc:
             raise BadGzipFile(f"Corrupted gzip header. Checksums do not "
                               f"match: {crc:04x} != {header_crc:04x}")
-    return last_mtime
+    return last_mtime, osid
 
 
 class _GzipReader(_streams.DecompressReader):
@@ -569,16 +577,19 @@ class _GzipReader(_streams.DecompressReader):
         # Set flag indicating start of a new member
         self._new_member = True
         self._last_mtime = None
+        self._last_osid = None
 
     def _init_read(self):
         self._crc = zlib.crc32(b"")
         self._stream_size = 0  # Decompressed size of unconcatenated stream
 
     def _read_gzip_header(self):
-        last_mtime = _read_gzip_header(self._fp)
-        if last_mtime is None:
+        result = _read_gzip_header(self._fp)
+        if result is None:
             return False
+        last_mtime, osid = result
         self._last_mtime = last_mtime
+        self._last_osid = osid
         return True
 
     def read(self, size=-1):
@@ -660,12 +671,13 @@ class _GzipReader(_streams.DecompressReader):
         self._new_member = True
 
 
-def compress(data, compresslevel=_COMPRESS_LEVEL_TRADEOFF, *, mtime=0):
+def compress(data, compresslevel=_COMPRESS_LEVEL_TRADEOFF, *, mtime=0, osid=255):
     """Compress data in one shot and return the compressed string.
 
     compresslevel sets the compression level in range of 0-9.
     mtime can be used to set the modification time.
     The modification time is set to 0 by default, for reproducibility.
+    The operating system ID is set to 255 (unknown) by default, for reproducibility.
     """
     # Wbits=31 automatically includes a gzip header and trailer.
     gzip_data = zlib.compress(data, level=compresslevel, wbits=31)
@@ -675,7 +687,7 @@ def compress(data, compresslevel=_COMPRESS_LEVEL_TRADEOFF, *, mtime=0):
         mtime = 0
     # Reuse gzip header created by zlib, replace mtime and OS byte for
     # consistency.
-    header = struct.pack("<4sLBB", gzip_data, int(mtime), gzip_data[8], 255)
+    header = struct.pack("<4sLBB", gzip_data, int(mtime), gzip_data[8], osid)
     return header + gzip_data[10:]
 
 

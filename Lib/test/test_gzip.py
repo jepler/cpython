@@ -352,6 +352,28 @@ class TestGzip(BaseTest):
             self.assertEqual(dataRead, data1)
             self.assertEqual(fRead.mtime, mtime)
 
+    def test_osid_with_stream(self):
+        for osid in [0, 1, 255]:
+            with gzip.GzipFile(self.filename, 'w', osid = osid) as fWrite:
+                self.assertEqual(fWrite.osid, osid)
+                fWrite.write(data1)
+            with gzip.GzipFile(self.filename) as fRead:
+                self.assertHasAttr(fRead, 'osid')
+                self.assertIsNone(fRead.osid)
+                dataRead = fRead.read()
+                self.assertEqual(dataRead, data1)
+                self.assertEqual(fRead.osid, osid)
+
+    def test_osid_with_compress(self):
+        for osid in [0, 1, 255]:
+            content = gzip.compress(data1, osid=osid)
+            with gzip.open(io.BytesIO(content), "rb") as fRead:
+                self.assertHasAttr(fRead, 'osid')
+                self.assertIsNone(fRead.osid)
+                dataRead = fRead.read()
+                self.assertEqual(dataRead, data1)
+                self.assertEqual(fRead.osid, osid)
+
     def test_mtime_with_open(self):
         mtime = 123456789
         with gzip.open(self.filename, "wb", mtime=mtime) as fWrite:
@@ -359,9 +381,11 @@ class TestGzip(BaseTest):
         with gzip.open(self.filename, "rb") as fRead:
             self.assertTrue(hasattr(fRead, 'mtime'))
             self.assertIsNone(fRead.mtime)
+            self.assertIsNone(fRead.osid)
             dataRead = fRead.read()
             self.assertEqual(dataRead, data1)
             self.assertEqual(fRead.mtime, mtime)
+            self.assertEqual(fRead.osid, 255)
 
     def test_mtime_out_of_range(self):
         for mtime in (-1, 2**32):

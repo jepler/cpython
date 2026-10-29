@@ -205,7 +205,7 @@ The module defines the following items:
       tradeoff between speed and performance.
 
 
-.. function:: compress(data, compresslevel=6, *, mtime=0)
+.. function:: compress(data, compresslevel=6, *, mtime=0, osid=255)
 
    Compress the *data*, returning a :class:`bytes` object containing
    the compressed data.  *compresslevel* and *mtime* have the same meaning as in
@@ -233,6 +233,12 @@ The module defines the following items:
       The default compression level was reduced to 6 (down from 9).
       It is the default level used by most compression tools and a better
       tradeoff between speed and performance.
+   .. versionchanged:: 3.16
+      Added the *osid* parameter. The default, ``255``, matches the behavior
+      of previous versions. A different value can be specified according
+      to the table in section 2.3.1 of `RFC1952`_.
+
+   .. _RFC1952: https://www.rfc-editor.org/info/rfc1952/
 
 .. function:: decompress(data)
 

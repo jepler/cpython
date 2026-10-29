@@ -459,6 +459,15 @@ gzip
   (Contributed by Marin Misur in :gh:`91372`.)
 * The write-only property :attr:`gzip.GzipFile.mtime` now returns the
   constructor value for :class:`~gzip.GzipFile` files in write mode.
+* :class:`~gzip.GzipFile` now accepts an optional argument ``osid``
+  which is used to set the "creating operating system" field of the gzip header.
+* :class:`~gzip.GzipFile` now has a read-only property ``osid`` which (when writing)
+  reflects the value given to the constructor
+  and (when reading) reflects the value read from the stream's last gzip header.
+* :func:`~gzip.open` now accepts an optional argument ``osid``
+  which is passed on to the constructor of the :class:`~gzip.GzipFile` class.
+* :func:`gzip.compress` now accepts an optional argument ``osid``
+  which is used to set the "creating operating system" field of the gzip header.
 
 
 imaplib
